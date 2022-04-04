@@ -1,7 +1,11 @@
 import { task, HardhatUserConfig } from "hardhat/config";
-import("@nomiclabs/hardhat-waffle");
-import("hardhat-watcher");
-import("hardhat-gas-reporter");
+import "@nomiclabs/hardhat-etherscan";
+import "@nomiclabs/hardhat-waffle";
+import "hardhat-watcher";
+import "hardhat-gas-reporter";
+import "solidity-coverage";
+import dotenv from "dotenv";
+dotenv.config();
 
 // This is a sample Hardhat task. To learn how to create your own go to
 // https://hardhat.org/guides/create-task.html
@@ -20,6 +24,17 @@ task("accounts", "Prints the list of accounts", async (taskArgs, hre) => {
  * @type import('hardhat/config').HardhatUserConfig
  */
 export default {
+  networks: {
+    hardhat: {},
+    rinkeby: {
+      url: `https://rinkeby.infura.io/v3/${process.env.INFURA_PROJECT_ID}`,
+      accounts: [process.env.PRIVATE_KEY],
+    },
+    mainnet: {
+      url: `https://mainnet.infura.io/v3/${process.env.INFURA_PROJECT_ID}`,
+      accounts: [process.env.PRIVATE_KEY],
+    },
+  },
   solidity: {
     version: "0.8.6",
     settings: {
@@ -36,7 +51,7 @@ export default {
       verbose: true,
     },
   },
-  mocha: {
-    timeout: 100000,
+  etherscan: {
+    apiKey: process.env.ETHERSCAN_API_KEY,
   },
 };
