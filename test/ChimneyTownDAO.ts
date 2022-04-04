@@ -331,6 +331,14 @@ describe("ChimneyTownDAO", () => {
       );
     });
 
+    it("reverts if token id is reserved", async () => {
+      await nft.setPrice(ethers.utils.parseEther("0.1"));
+      await nft.setSaleStatus(true);
+      await expect(
+        nft.connect(alice).mint(9900, { value: ethers.utils.parseEther("0.1") })
+      ).to.be.revertedWith("ChimneyTownDAO: Invalid token id");
+    });
+
     it("reverts if value is invalid", async () => {
       await nft.setPrice(ethers.utils.parseEther("0.1"));
       await nft.setSaleStatus(true);
@@ -367,6 +375,16 @@ describe("ChimneyTownDAO", () => {
       await expect(nft.mintBatch([0, 1])).to.be.revertedWith(
         "ChimneyTownDAO: Not on sale"
       );
+    });
+
+    it("reverts if token id is reserved", async () => {
+      await nft.setPrice(ethers.utils.parseEther("0.1"));
+      await nft.setSaleStatus(true);
+      await expect(
+        nft
+          .connect(alice)
+          .mintBatch([9900], { value: ethers.utils.parseEther("0.1") })
+      ).to.be.revertedWith("ChimneyTownDAO: Invalid token id");
     });
 
     it("reverts if value is invalid", async () => {
