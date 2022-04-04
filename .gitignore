@@ -137,3 +137,6 @@ typechain
 #Hardhat files
 cache
 artifacts
+
+types/
+.deps/
