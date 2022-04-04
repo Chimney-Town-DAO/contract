@@ -30,9 +30,7 @@ describe("ChimneyTownDAO", () => {
     [owner, alice, bob, carol, dan, eve, primaryRecipient] =
       await ethers.getSigners();
 
-    nft = (await ChimneyTown.deploy(
-      "https://example.com/image"
-    )) as ChimneyTownDAO;
+    nft = (await ChimneyTown.deploy("https://example.com/")) as ChimneyTownDAO;
 
     elements = [
       await alice.getAddress(),
@@ -60,27 +58,34 @@ describe("ChimneyTownDAO", () => {
     expect(await nft.symbol()).to.equal("CTD");
   });
 
-  describe("nextPublicId", () => {
+  describe("remainingForSale", () => {
     it("returns id", async () => {
-      expect((await nft.nextPublicId()).toNumber()).to.equal(0);
+      expect((await nft.remainingForSale()).toNumber()).to.equal(9900);
       await nft.setPrice(ethers.utils.parseEther("0.1"));
       await nft.setSaleStatus(true);
-      await nft.mint({ value: ethers.utils.parseEther("0.1") });
-      expect((await nft.nextPublicId()).toNumber()).to.equal(1);
-      await nft.mintReserve(1, await alice.getAddress());
-      expect((await nft.nextPublicId()).toNumber()).to.equal(1);
+      await nft.mint(0, { value: ethers.utils.parseEther("0.1") });
+      expect((await nft.remainingForSale()).toNumber()).to.equal(9899);
+
+      await nft.mintBatch([1, 2], { value: ethers.utils.parseEther("0.2") });
+      expect((await nft.remainingForSale()).toNumber()).to.equal(9897);
+
+      await nft.setMerkleRoot(root);
+      const leaf = keccak256(await alice.getAddress());
+      const proof = merkleTree.getHexProof(leaf);
+      await nft.connect(alice).claim(3, proof);
+      expect((await nft.remainingForSale()).toNumber()).to.equal(9896);
     });
   });
 
-  describe("nextReserveId", () => {
+  describe("remainingReserved", () => {
     it("returns id", async () => {
-      expect((await nft.nextReserveId()).toNumber()).to.equal(9900);
+      expect((await nft.remainingReserved()).toNumber()).to.equal(100);
       await nft.setPrice(ethers.utils.parseEther("0.1"));
       await nft.setSaleStatus(true);
-      await nft.mint({ value: ethers.utils.parseEther("0.1") });
-      expect((await nft.nextReserveId()).toNumber()).to.equal(9900);
+      await nft.mint(0, { value: ethers.utils.parseEther("0.1") });
+      expect((await nft.remainingReserved()).toNumber()).to.equal(100);
       await nft.mintReserve(1, await alice.getAddress());
-      expect((await nft.nextReserveId()).toNumber()).to.equal(9901);
+      expect((await nft.remainingReserved()).toNumber()).to.equal(99);
     });
   });
 
@@ -156,7 +161,7 @@ describe("ChimneyTownDAO", () => {
       await nft.setMerkleRoot(root);
       const leaf = keccak256(await alice.getAddress());
       const proof = merkleTree.getHexProof(leaf);
-      await nft.connect(alice).claim(proof);
+      await nft.connect(alice).claim(0, proof);
 
       expect(await nft.isClaimed(await alice.getAddress())).to.be.true;
     });
@@ -164,79 +169,132 @@ describe("ChimneyTownDAO", () => {
     it("returns false if minted but not claimed", async () => {
       await nft.setPrice(ethers.utils.parseEther("0.1"));
       await nft.setSaleStatus(true);
-      await nft.connect(alice).mint({ value: ethers.utils.parseEther("0.1") });
+      await nft
+        .connect(alice)
+        .mint(0, { value: ethers.utils.parseEther("0.1") });
 
       expect(await nft.isClaimed(await alice.getAddress())).to.be.false;
     });
   });
 
-  describe("prepareMetadataJSON", () => {
-    it("returns parsable JSON", async () => {
-      JSON.parse(await nft.prepareMetadataJSON(0));
-      await nft.updateAnimationURL("https://example.com/animation");
-      JSON.parse(await nft.prepareMetadataJSON(1));
-      await nft.updateExternalURL("https://example.com/external");
+  describe("mintedSalesTokenIdList", () => {
+    it("returns empty list if not minted yet", async () => {
+      const list = await nft.mintedSalesTokenIdList(0, 100);
+      expect(list.map((id) => id.toNumber())).to.deep.equal([]);
     });
 
-    it("number of name is dynamic", async () => {
-      expect(JSON.parse(await nft.prepareMetadataJSON(0)).name).to.equal(
-        "CHIMNEY TOWN DAO #0"
+    it("added minted list by mint(), mintBatch() and claim(), except mintReserved()", async () => {
+      await nft.setPrice(ethers.utils.parseEther("0.1"));
+      await nft.setSaleStatus(true);
+      await nft.mint(0, { value: ethers.utils.parseEther("0.1") });
+      await nft.mintBatch([1, 2], { value: ethers.utils.parseEther("0.2") });
+      await nft.setMerkleRoot(root);
+      const leaf = keccak256(await alice.getAddress());
+      const proof = merkleTree.getHexProof(leaf);
+      await nft.connect(alice).claim(3, proof);
+
+      const list1 = await nft.mintedSalesTokenIdList(0, 100);
+      expect(list1.map((id) => id.toNumber())).to.deep.equal([0, 1, 2, 3]);
+
+      await nft.mintReserve(1, await alice.getAddress());
+      const list2 = await nft.mintedSalesTokenIdList(0, 100);
+      expect(list2.map((id) => id.toNumber())).to.deep.equal([0, 1, 2, 3]);
+    });
+
+    it("returns entire list limit is greater than minted list", async () => {
+      await nft.setPrice(ethers.utils.parseEther("0.1"));
+      await nft.setSaleStatus(true);
+      await nft.mint(0, { value: ethers.utils.parseEther("0.1") });
+
+      const list = await nft.mintedSalesTokenIdList(0, 100);
+      expect(list.map((id) => id.toNumber())).to.deep.equal([0]);
+    });
+
+    it("returns limited list by offset", async () => {
+      await nft.setPrice(ethers.utils.parseEther("0.1"));
+      await nft.setSaleStatus(true);
+
+      await nft.mintBatch(
+        [...Array(100)].map((_, i) => i),
+        { value: ethers.utils.parseEther("10") }
       );
-      expect(JSON.parse(await nft.prepareMetadataJSON(1)).name).to.equal(
-        "CHIMNEY TOWN DAO #1"
+
+      const list = await nft.mintedSalesTokenIdList(0, 10);
+      expect(list.map((id) => id.toNumber())).to.deep.equal(
+        [...Array(10)].map((_, index) => index + 0)
       );
     });
 
-    it("contains image", async () => {
-      expect(JSON.parse(await nft.prepareMetadataJSON(0)).image).to.equal(
-        "https://example.com/image"
+    it("returns skipped list by offset", async () => {
+      await nft.setPrice(ethers.utils.parseEther("0.1"));
+      await nft.setSaleStatus(true);
+
+      await nft.mintBatch(
+        [...Array(100)].map((_, i) => i),
+        { value: ethers.utils.parseEther("10") }
       );
-      await nft.updateImageURL("https://example.com/updatedimage");
-      expect(JSON.parse(await nft.prepareMetadataJSON(0)).image).to.equal(
-        "https://example.com/updatedimage"
+
+      const list = await nft.mintedSalesTokenIdList(10, 10);
+      expect(list.map((id) => id.toNumber())).to.deep.equal(
+        [...Array(10)].map((_, index) => index + 0 + 10)
       );
     });
 
-    it("contains empty description", async () => {
-      expect(JSON.parse(await nft.prepareMetadataJSON(0)).description).to.equal(
-        ""
+    it("returns empty list if offset is greater than length", async () => {
+      await nft.setPrice(ethers.utils.parseEther("0.1"));
+      await nft.setSaleStatus(true);
+
+      await nft.mintBatch(
+        [...Array(10)].map((_, i) => i),
+        { value: ethers.utils.parseEther("1") }
+      );
+
+      const list = await nft.mintedSalesTokenIdList(11, 10);
+      expect(list).to.deep.equal([]);
+    });
+
+    it("returns arbitrary id list ", async () => {
+      await nft.setPrice(ethers.utils.parseEther("0.1"));
+      await nft.setSaleStatus(true);
+
+      const idList = [
+        800, 1500, 7300, 5000, 1234, 2222, 4444, 3333, 6666, 4321,
+      ];
+
+      for (let i = 0; i < idList.length; i++) {
+        await nft.mint(idList[i], { value: ethers.utils.parseEther("0.1") });
+      }
+
+      const list1 = await nft.mintedSalesTokenIdList(0, 10);
+      expect(list1.map((id) => id.toNumber())).to.deep.equal(idList);
+
+      const list2 = await nft.mintedSalesTokenIdList(5, 5);
+      expect(list2.map((id) => id.toNumber())).to.deep.equal(idList.slice(5));
+
+      const list3 = await nft.mintedSalesTokenIdList(0, 5);
+      expect(list3.map((id) => id.toNumber())).to.deep.equal(
+        idList.slice(0, 5)
       );
     });
 
-    it("parsable if animation and external are set", async () => {
-      await nft.updateAnimationURL("https://example.com/animation");
-      await nft.updateExternalURL("https://example.com/external");
-      JSON.parse(await nft.prepareMetadataJSON(0));
-    });
+    it("dont revert and returns list if out of bounds happened", async () => {
+      await nft.setPrice(ethers.utils.parseEther("0.1"));
+      await nft.setSaleStatus(true);
 
-    it("include animation url is its set", async () => {
-      await nft.updateAnimationURL("https://example.com/animation");
-      expect(
-        JSON.parse(await nft.prepareMetadataJSON(0)).animation_url
-      ).to.equal("https://example.com/animation");
-    });
+      await nft.connect(alice).mintBatch(
+        [...Array(100)].map((_, i) => i),
+        { value: ethers.utils.parseEther("10") }
+      );
 
-    it("does not include animation url is its not set", async () => {
-      expect(
-        JSON.parse(await nft.prepareMetadataJSON(0)).hasOwnProperty(
-          "animation_url"
-        )
-      ).to.be.false;
-    });
+      const list1 = await nft.mintedSalesTokenIdList(0, 101);
+      expect(list1.map((id) => id.toNumber())).to.deep.equal(
+        [...Array(100)].map((_, index) => index)
+      );
 
-    it("include external url is its set", async () => {
-      await nft.updateExternalURL("https://example.com/external");
-      expect(
-        JSON.parse(await nft.prepareMetadataJSON(0)).external_url
-      ).to.equal("https://example.com/external");
-    });
-
-    it("does not include external url is its not set", async () => {
-      expect(
-        JSON.parse(await nft.prepareMetadataJSON(0)).hasOwnProperty(
-          "external_url"
-        )
-      ).to.be.false;
+      const list2 = await nft.mintedSalesTokenIdList(50, 101);
+      expect(list2.map((id) => id.toNumber())).to.deep.equal(
+        [...Array(50)].map((_, index) => index + 50)
+      );
     });
   });
 
@@ -244,7 +302,7 @@ describe("ChimneyTownDAO", () => {
     it("return string", async () => {
       await nft.setPrice(ethers.utils.parseEther("0.1"));
       await nft.setSaleStatus(true);
-      await nft.mint({ value: ethers.utils.parseEther("0.1") });
+      await nft.mint(0, { value: ethers.utils.parseEther("0.1") });
       expect(await nft.tokenURI(0)).to.not.equal("");
     });
 
@@ -259,14 +317,16 @@ describe("ChimneyTownDAO", () => {
     it("success", async () => {
       await nft.setPrice(ethers.utils.parseEther("0.1"));
       await nft.setSaleStatus(true);
-      await nft.connect(alice).mint({ value: ethers.utils.parseEther("0.1") });
+      await nft
+        .connect(alice)
+        .mint(0, { value: ethers.utils.parseEther("0.1") });
       expect(await nft.ownerOf(0)).to.equals(await alice.getAddress());
-      await nft.connect(bob).mint({ value: ethers.utils.parseEther("0.1") });
+      await nft.connect(bob).mint(1, { value: ethers.utils.parseEther("0.1") });
       expect(await nft.ownerOf(1)).to.equals(await bob.getAddress());
     });
 
     it("reverts if not on sale", async () => {
-      await expect(nft.mint()).to.be.revertedWith(
+      await expect(nft.mint(0)).to.be.revertedWith(
         "ChimneyTownDAO: Not on sale"
       );
     });
@@ -275,10 +335,10 @@ describe("ChimneyTownDAO", () => {
       await nft.setPrice(ethers.utils.parseEther("0.1"));
       await nft.setSaleStatus(true);
       await expect(
-        nft.connect(alice).mint({ value: ethers.utils.parseEther("0.2") })
+        nft.connect(alice).mint(0, { value: ethers.utils.parseEther("0.2") })
       ).to.be.revertedWith("ChimneyTownDAO: Invalid price");
       await expect(
-        nft.connect(alice).mint({ value: ethers.utils.parseEther("0.05") })
+        nft.connect(alice).mint(0, { value: ethers.utils.parseEther("0.05") })
       ).to.be.revertedWith("ChimneyTownDAO: Invalid price");
     });
   });
@@ -289,14 +349,14 @@ describe("ChimneyTownDAO", () => {
       await nft.setSaleStatus(true);
       await nft
         .connect(alice)
-        .mintBatch(2, { value: ethers.utils.parseEther("0.2") });
+        .mintBatch([0, 1], { value: ethers.utils.parseEther("0.2") });
       expect(
         (await nft.balanceOf(await alice.getAddress())).toNumber()
       ).to.equals(2);
       expect(await nft.ownerOf(0)).to.equals(await alice.getAddress());
       await nft
         .connect(bob)
-        .mintBatch(2, { value: ethers.utils.parseEther("0.2") });
+        .mintBatch([2, 3], { value: ethers.utils.parseEther("0.2") });
       expect(
         (await nft.balanceOf(await bob.getAddress())).toNumber()
       ).to.equals(2);
@@ -304,7 +364,7 @@ describe("ChimneyTownDAO", () => {
     });
 
     it("reverts if not on sale", async () => {
-      await expect(nft.mintBatch(2)).to.be.revertedWith(
+      await expect(nft.mintBatch([0, 1])).to.be.revertedWith(
         "ChimneyTownDAO: Not on sale"
       );
     });
@@ -315,12 +375,12 @@ describe("ChimneyTownDAO", () => {
       await expect(
         nft
           .connect(alice)
-          .mintBatch(2, { value: ethers.utils.parseEther("0.3") })
+          .mintBatch([0], { value: ethers.utils.parseEther("0.3") })
       ).to.be.revertedWith("ChimneyTownDAO: Invalid price");
       await expect(
         nft
           .connect(alice)
-          .mintBatch(2, { value: ethers.utils.parseEther("0.1") })
+          .mintBatch([0, 1], { value: ethers.utils.parseEther("0.1") })
       ).to.be.revertedWith("ChimneyTownDAO: Invalid price");
     });
   });
@@ -330,12 +390,12 @@ describe("ChimneyTownDAO", () => {
       await nft.setMerkleRoot(root);
       const leaf = keccak256(await alice.getAddress());
       const proof = merkleTree.getHexProof(leaf);
-      await nft.connect(alice).claim(proof);
+      await nft.connect(alice).claim(0, proof);
       expect(await nft.ownerOf(0)).to.equal(await alice.getAddress());
 
       await nft
         .connect(bob)
-        .claim(merkleTree.getHexProof(keccak256(await bob.getAddress())));
+        .claim(1, merkleTree.getHexProof(keccak256(await bob.getAddress())));
       expect(await nft.ownerOf(1)).to.equal(await bob.getAddress());
     });
 
@@ -356,6 +416,7 @@ describe("ChimneyTownDAO", () => {
       await nft
         .connect(alice)
         .claim(
+          0,
           realisticMerkleTree.getHexProof(keccak256(await alice.getAddress()))
         );
       expect(await nft.ownerOf(0)).to.equal(await alice.getAddress());
@@ -368,7 +429,7 @@ describe("ChimneyTownDAO", () => {
       const proof = merkleTree.getHexProof(leaf);
       await nft
         .connect(alice)
-        .claim(proof, { value: ethers.utils.parseEther("0.1") });
+        .claim(0, proof, { value: ethers.utils.parseEther("0.1") });
       const balance2 = await ethers.provider.getBalance(nft.address);
       expect(ethers.utils.formatEther(balance2.sub(balance1))).to.equal("0.1");
     });
@@ -377,12 +438,12 @@ describe("ChimneyTownDAO", () => {
       await nft.setMerkleRoot(root);
       const leaf = keccak256(await alice.getAddress());
       const proof = merkleTree.getHexProof(leaf);
-      await nft.connect(alice).claim(proof);
+      await nft.connect(alice).claim(0, proof);
       expect(await nft.ownerOf(0)).to.equal(await alice.getAddress());
       await expect(
         nft
           .connect(dan)
-          .claim(merkleTree.getHexProof(keccak256(await dan.getAddress())))
+          .claim(0, merkleTree.getHexProof(keccak256(await dan.getAddress())))
       ).to.be.revertedWith("ChimneyTownDAO: Can not verify");
 
       const newMerkleTree = new MerkleTree(
@@ -402,40 +463,65 @@ describe("ChimneyTownDAO", () => {
       await nft.setMerkleRoot(newMerkleTree.getHexRoot());
       await nft
         .connect(dan)
-        .claim(newMerkleTree.getHexProof(keccak256(await dan.getAddress())));
+        .claim(1, newMerkleTree.getHexProof(keccak256(await dan.getAddress())));
     });
 
     it("reverts if account already claimed", async () => {
       await nft.setMerkleRoot(root);
       const leaf = keccak256(await alice.getAddress());
       const proof = merkleTree.getHexProof(leaf);
-      await nft.connect(alice).claim(proof);
-      await expect(nft.connect(alice).claim(proof)).to.be.revertedWith(
+      await nft.connect(alice).claim(0, proof);
+      await expect(nft.connect(alice).claim(0, proof)).to.be.revertedWith(
         "ChimneyTownDAO: Account minted token already"
       );
+    });
+
+    it("reverts if id is for reserved", async () => {
+      await nft.setMerkleRoot(root);
+      const leaf = keccak256(await alice.getAddress());
+      const proof = merkleTree.getHexProof(leaf);
+      await expect(nft.connect(alice).claim(9900, proof)).to.be.revertedWith(
+        "ChimneyTownDAO: Invalid token id"
+      );
+      await expect(nft.connect(alice).claim(9999, proof)).to.be.revertedWith(
+        "ChimneyTownDAO: Invalid token id"
+      );
+      await nft.connect(alice).claim(0, proof);
     });
 
     it("reverts if invalid proof is given", async () => {
       await nft.setMerkleRoot(root);
       const leaf = keccak256(await bob.getAddress());
       const proof = merkleTree.getHexProof(leaf);
-      await expect(nft.connect(alice).claim(proof)).to.be.revertedWith(
+      await expect(nft.connect(alice).claim(0, proof)).to.be.revertedWith(
         "ChimneyTownDAO: Can not verify"
       );
     });
 
     it("revert if merkle root is empty", async () => {
-      await expect(nft.claim([])).to.be.revertedWith(
+      await expect(nft.claim(0, [])).to.be.revertedWith(
         "ChimneyTownDAO: No merkle root"
       );
     });
   });
 
-  describe("updateImageURL", () => {
+  describe("updateBaseURI", () => {
+    it("update base uri", async () => {
+      await nft.setMerkleRoot(root);
+      const leaf = keccak256(await alice.getAddress());
+      const proof = merkleTree.getHexProof(leaf);
+      await nft.connect(alice).claim(0, proof);
+      expect(await nft.tokenURI(0)).to.equal("https://example.com/0.json");
+      await nft.updateBaseURI("https://example.com/updated/");
+      expect(await nft.tokenURI(0)).to.equal(
+        "https://example.com/updated/0.json"
+      );
+    });
+
     it("reverts if metadata is frozen", async () => {
       await nft.freezeMetadata();
-      await expect(nft.updateImageURL("should be reverted")).to.be.revertedWith(
-        "ChimneyTownDAO: Already frozen"
+      await expect(nft.updateBaseURI("should be reverted")).to.be.revertedWith(
+        "ChimneyTownDAO: Metadata is frozen"
       );
     });
   });
@@ -453,9 +539,7 @@ describe("ChimneyTownDAO", () => {
       expect(
         (await nft.balanceOf(await alice.getAddress())).toNumber()
       ).to.equal(100);
-      await expect(
-        nft.mintReserve(1, await alice.getAddress())
-      ).to.be.revertedWith("ChimneyTownDAO: All reserved tokens are minted");
+      await expect(nft.mintReserve(1, await alice.getAddress())).to.be.reverted;
     });
 
     it("only owner", async () => {
@@ -478,7 +562,7 @@ describe("ChimneyTownDAO", () => {
       const balance1 = await primaryRecipient.getBalance();
       await nft.setPrice(ethers.utils.parseEther("0.1"));
       await nft.setSaleStatus(true);
-      await nft.mint({ value: ethers.utils.parseEther("0.1") });
+      await nft.mint(0, { value: ethers.utils.parseEther("0.1") });
       await nft.withdraw(
         await primaryRecipient.getAddress(),
         await ethers.provider.getBalance(nft.address)
@@ -492,7 +576,7 @@ describe("ChimneyTownDAO", () => {
       const balance1 = await alice.getBalance();
       await nft.setPrice(ethers.utils.parseEther("0.1"));
       await nft.setSaleStatus(true);
-      await nft.mint({ value: ethers.utils.parseEther("0.1") });
+      await nft.mint(0, { value: ethers.utils.parseEther("0.1") });
       await nft.withdraw(
         await alice.getAddress(),
         await ethers.provider.getBalance(nft.address)
@@ -506,7 +590,7 @@ describe("ChimneyTownDAO", () => {
       const balance1 = await alice.getBalance();
       await nft.setPrice(ethers.utils.parseEther("0.1"));
       await nft.setSaleStatus(true);
-      await nft.mint({ value: ethers.utils.parseEther("0.1") });
+      await nft.mint(0, { value: ethers.utils.parseEther("0.1") });
       await nft.withdraw(
         await alice.getAddress(),
         ethers.utils.parseEther("0.05")
@@ -522,7 +606,7 @@ describe("ChimneyTownDAO", () => {
       ).to.be.revertedWith("Address: insufficient balance");
       await nft.setPrice(ethers.utils.parseEther("0.1"));
       await nft.setSaleStatus(true);
-      await nft.mint({ value: ethers.utils.parseEther("0.1") });
+      await nft.mint(0, { value: ethers.utils.parseEther("0.1") });
       await expect(
         nft.withdraw(await alice.getAddress(), ethers.utils.parseEther("0.2"))
       ).to.be.revertedWith("Address: insufficient balance");
@@ -559,27 +643,32 @@ describe("ChimneyTownDAO", () => {
   xit("sold out", async () => {
     await nft.setPrice(ethers.utils.parseEther("0.01"));
     await nft.setSaleStatus(true);
-    for (let i = 0; i < 99; i++) {
-      console.log("i: ", i);
+
+    for (let i = 0; i < 9900; i++) {
+      if (i % 100 == 0) {
+        console.log("i: ", i);
+      }
       await nft
         .connect(alice)
-        .mintBatch(100, { value: ethers.utils.parseEther("1") });
+        .mint(i, { value: ethers.utils.parseEther("0.01") });
     }
+
     await expect(
-      nft.connect(alice).mint({ value: ethers.utils.parseEther("0.01") })
-    ).to.be.revertedWith("ChimneyTownDAO: All public tokens are minted");
+      nft.connect(alice).mint(0, { value: ethers.utils.parseEther("0.01") })
+    ).to.be.revertedWith("ERC721: token already minted");
     await expect(
-      nft.connect(alice).mintBatch(100, { value: ethers.utils.parseEther("1") })
-    ).to.be.revertedWith("ChimneyTownDAO: All public tokens are minted");
+      nft.connect(alice).mintBatch(
+        [...Array(100)].map((_, i) => i),
+        { value: ethers.utils.parseEther("1") }
+      )
+    ).to.be.revertedWith("ERC721: token already minted");
     await nft.setMerkleRoot(root);
     const leaf = keccak256(await alice.getAddress());
     const proof = merkleTree.getHexProof(leaf);
-    await expect(nft.connect(alice).claim(proof)).to.be.revertedWith(
-      "ChimneyTownDAO: All public tokens are minted"
+    await expect(nft.connect(alice).claim(0, proof)).to.be.revertedWith(
+      "ERC721: token already minted"
     );
     await nft.mintReserve(100, await alice.getAddress());
-    await expect(
-      nft.mintReserve(1, await alice.getAddress())
-    ).to.be.revertedWith("ChimneyTownDAO: All reserved tokens are minted");
+    await expect(nft.mintReserve(1, await alice.getAddress())).to.be.reverted;
   });
 });

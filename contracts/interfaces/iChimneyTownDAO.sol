@@ -7,9 +7,14 @@ interface iChimneyTownDAO {
     //******************************
     // view functions
     //******************************
-    function nextPublicId() external view returns (uint256);
+    function remainingForSale() external view returns (uint256);
 
-    function nextReserveId() external view returns (uint256);
+    function remainingReserved() external view returns (uint256);
+
+    function mintedSalesTokenIdList(
+        uint256 offset,
+        uint256 limit
+    ) external view returns (uint256[] memory);
 
     function priceInWei() external view returns (uint256);
 
@@ -22,20 +27,16 @@ interface iChimneyTownDAO {
     //******************************
     // public functions
     //******************************
-    function mint() external payable;
+    function mint(uint256 tokenId) external payable;
 
-    function mintBatch(uint256 quantity) external payable;
+    function mintBatch(uint256[] memory tokenIdList) external payable;
 
-    function claim(bytes32[] calldata merkleProof) external payable;
+    function claim(uint256 tokenId, bytes32[] calldata merkleProof) external payable;
 
     //******************************
     // admin functions
     //******************************
-    function updateImageURL(string memory url) external;
-
-    function updateAnimationURL(string memory url) external;
-
-    function updateExternalURL(string memory url) external;
+    function updateBaseURI(string memory url) external;
 
     function freezeMetadata() external;
 
