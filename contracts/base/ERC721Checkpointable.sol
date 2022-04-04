@@ -3,21 +3,18 @@
 /// @title Vote checkpointing for an ERC-721 token
 
 // LICENSE
-// ERC721Checkpointable.sol uses and modifies part of Compound Lab's Comp.sol:
-// https://github.com/compound-finance/compound-protocol/blob/ae4388e780a8d596d97619d9704a931a2752c2bc/contracts/Governance/Comp.sol
+// ERC721Checkpointable.sol uses and modifies part of Nounders DAO's ERC721Checkpointable.sol:
+// https://github.com/nounsDAO/nouns-monorepo/blob/master/packages/nouns-contracts/contracts/base/ERC721Checkpointable.sol
 //
-// Comp.sol source code Copyright 2020 Compound Labs, Inc. licensed under the BSD-3-Clause license.
-// With modifications by Nounders DAO.
+// ERC721Checkpointable.sol source code Copyright 2021 Nounders DAO. licensed under the BSD-3-Clause license.
+// With modifications by TART.
 //
 // Additional conditions of BSD-3-Clause can be found here: https://opensource.org/licenses/BSD-3-Clause
 //
 // MODIFICATIONS
-// Checkpointing logic from Comp.sol has been used with the following modifications:
-// - `delegates` is renamed to `_delegates` and is set to private
-// - `delegates` is a public function that uses the `_delegates` mapping look-up, but unlike
-//   Comp.sol, returns the delegator's own address if there is no delegate.
-//   This avoids the delegator needing to "delegate to self" with an additional transaction
-// - `_transferTokens()` is renamed `_beforeTokenTransfer()` and adapted to hook into OpenZeppelin's ERC721 hooks.
+// 
+// ERC721Checkpointable.sol has been used with the following modifications:
+// - import OpenZeppelin's ERC721Enumerable .sol instead of Nounders DAO's one
 
 pragma solidity ^0.8.6;
 
