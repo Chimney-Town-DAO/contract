@@ -655,19 +655,17 @@ describe("ChimneyTownDAO", () => {
 
     await expect(
       nft.connect(alice).mint(0, { value: ethers.utils.parseEther("0.01") })
-    ).to.be.revertedWith("ERC721: token already minted");
+    ).to.be.reverted;
     await expect(
       nft.connect(alice).mintBatch(
         [...Array(100)].map((_, i) => i),
         { value: ethers.utils.parseEther("1") }
       )
-    ).to.be.revertedWith("ERC721: token already minted");
+    ).to.be.reverted;
     await nft.setMerkleRoot(root);
     const leaf = keccak256(await alice.getAddress());
     const proof = merkleTree.getHexProof(leaf);
-    await expect(nft.connect(alice).claim(0, proof)).to.be.revertedWith(
-      "ERC721: token already minted"
-    );
+    await expect(nft.connect(alice).claim(0, proof)).to.be.reverted;
     await nft.mintReserve(100, await alice.getAddress());
     await expect(nft.mintReserve(1, await alice.getAddress())).to.be.reverted;
   });
